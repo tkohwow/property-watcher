@@ -1,6 +1,8 @@
 # Property Watcher
 
-気になる中古マンション等の物件URLを定期監視し、掲載終了・価格変更・タイトル変更・本文変化をSQLiteに保存し、Gmailへ通知する自分用Botです。
+気になる中古マンション等の物件URLを1日1回監視し、掲載終了・価格変更・タイトル変更・本文変化を検知してGmailへ通知する自分用Botです。
+
+この版は **最新状態だけ保存** する設計です。日次スナップショットを毎回増やさず、物件ごとの最後の取得結果だけを `latest_snapshots` に上書き保存します。価格変更・掲載終了などの変化は `events` に履歴として残します。
 
 ## 構成
 
@@ -71,6 +73,81 @@ python -m property_watcher.run --csv properties.csv --db property_watcher.db
 
 GitHub Actionsの無料枠・対象サイトへの負荷を考え、最初はこの程度で十分です。
 
+## 保存されるデータ
+
+### `targets`
+
+監視対象の物件URLです。
+
+- `url`
+- `name`
+- `memo`
+- `created_at`
+- `updated_at`
+
+### `latest_snapshots`
+
+物件URLごとの最後の取得状態だけを保存します。毎日増えず、上書きされます。
+
+- `url`
+- `fetched_at`
+- `ok`
+- `status_code`
+- `final_url`
+- `title`
+- `price`
+- `status_text`
+- `contact_available`
+- `content_hash`
+- `raw_text`
+- `error`
+
+`raw_text` には、最後に取得できたページ本文の正規化済みテキストを保存します。HTML全文ではありませんが、あとから「最後にどういう内容だったか」を確認しやすくするための項目です。
+
+### `events`
+
+変化があった時だけ履歴として追加します。
+
+- `url`
+- `occurred_at`
+- `severity`
+- `event_type`
+- `message`
+- `old_value`
+- `new_value`
+
+## DBを後から見る例
+
+SQLiteでDBを開きます。
+
+```bash
+sqlite3 property_watcher.db
+```
+
+最新状態を見る:
+
+```sql
+.headers on
+.mode column
+select url, fetched_at, status_code, title, price, status_text, contact_available
+from latest_snapshots;
+```
+
+最後に取得した本文を一部見る:
+
+```sql
+select url, substr(raw_text, 1, 1000) as raw_text_preview
+from latest_snapshots;
+```
+
+変化履歴を見る:
+
+```sql
+select occurred_at, severity, event_type, message, old_value, new_value
+from events
+order by id desc;
+```
+
 ## 検知内容
 
 - HTTPステータス変化
@@ -89,6 +166,19 @@ GitHub Actionsの無料枠・対象サイトへの負荷を考え、最初はこ
 ```
 
 初回登録時はDBに保存するだけで、通知は飛ばしません。2回目以降に差分が出た場合だけ通知します。
+
+## 旧版から更新する場合
+
+既存の `property_watcher.db` がある場合でも、そのまま使えます。
+
+旧版の `snapshots` に前回取得結果が残っている場合、新版は初回だけそこを参照して差分比較します。以後は `latest_snapshots` に最新状態だけを上書き保存します。
+
+旧版で蓄積された `snapshots` を削除してDBを軽くしたい場合は、動作確認後に以下を実行できます。
+
+```sql
+delete from snapshots;
+vacuum;
+```
 
 ## 注意
 

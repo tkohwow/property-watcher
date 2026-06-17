@@ -21,4 +21,5 @@ class Snapshot:
     status_text: str
     contact_available: Optional[bool]
     content_hash: str
+    raw_text: str = ""
     error: Optional[str] = None

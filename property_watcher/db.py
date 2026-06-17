@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS targets (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 旧版互換用。旧DBに snapshots が残っていても読み取りだけできるように残す。
+-- 新規データはこのテーブルには追加せず、latest_snapshots に上書き保存する。
 CREATE TABLE IF NOT EXISTS snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     url TEXT NOT NULL,
@@ -31,6 +33,23 @@ CREATE TABLE IF NOT EXISTS snapshots (
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_url_id ON snapshots(url, id);
+
+-- URLごとに「最後に取得した状態」だけを保持するテーブル。
+CREATE TABLE IF NOT EXISTS latest_snapshots (
+    url TEXT PRIMARY KEY,
+    fetched_at TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    status_code INTEGER,
+    final_url TEXT,
+    title TEXT,
+    price INTEGER,
+    status_text TEXT,
+    contact_available INTEGER,
+    content_hash TEXT NOT NULL,
+    raw_text TEXT,
+    error TEXT,
+    FOREIGN KEY(url) REFERENCES targets(url)
+);
 
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,13 +89,25 @@ def upsert_target(conn: sqlite3.Connection, url: str, name: str, memo: str = "")
     )
 
 
-def insert_snapshot(conn: sqlite3.Connection, snapshot: Snapshot) -> None:
+def upsert_latest_snapshot(conn: sqlite3.Connection, snapshot: Snapshot) -> None:
     conn.execute(
         """
-        INSERT INTO snapshots(
+        INSERT INTO latest_snapshots(
             url, fetched_at, ok, status_code, final_url, title, price,
-            status_text, contact_available, content_hash, error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status_text, contact_available, content_hash, raw_text, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(url) DO UPDATE SET
+            fetched_at = excluded.fetched_at,
+            ok = excluded.ok,
+            status_code = excluded.status_code,
+            final_url = excluded.final_url,
+            title = excluded.title,
+            price = excluded.price,
+            status_text = excluded.status_text,
+            contact_available = excluded.contact_available,
+            content_hash = excluded.content_hash,
+            raw_text = excluded.raw_text,
+            error = excluded.error
         """,
         (
             snapshot.url,
@@ -89,12 +120,21 @@ def insert_snapshot(conn: sqlite3.Connection, snapshot: Snapshot) -> None:
             snapshot.status_text,
             None if snapshot.contact_available is None else int(snapshot.contact_available),
             snapshot.content_hash,
+            snapshot.raw_text,
             snapshot.error,
         ),
     )
 
 
 def get_latest_snapshot(conn: sqlite3.Connection, url: str) -> Optional[sqlite3.Row]:
+    latest = conn.execute(
+        "SELECT * FROM latest_snapshots WHERE url = ? LIMIT 1",
+        (url,),
+    ).fetchone()
+    if latest is not None:
+        return latest
+
+    # 旧版DBから移行した直後でも、前回値との差分比較ができるようにフォールバックする。
     return conn.execute(
         "SELECT * FROM snapshots WHERE url = ? ORDER BY id DESC LIMIT 1",
         (url,),

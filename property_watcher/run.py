@@ -3,7 +3,7 @@ import csv
 import time
 from pathlib import Path
 
-from .db import connect, upsert_target, get_latest_snapshot, insert_snapshot, insert_events
+from .db import connect, upsert_target, get_latest_snapshot, upsert_latest_snapshot, insert_events
 from .diff import compare
 from .fetcher import fetch_snapshot
 from .models import PropertyTarget
@@ -52,7 +52,7 @@ def main() -> None:
         current = fetch_snapshot(target.url)
         events = compare(target, previous, current)
 
-        insert_snapshot(conn, current)
+        upsert_latest_snapshot(conn, current)
         if events:
             insert_events(conn, events)
             for event in events:

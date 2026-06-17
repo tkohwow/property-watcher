@@ -52,6 +52,8 @@ def parse_html(html: str) -> dict:
     if soup.title and soup.title.string:
         title = normalize_text(soup.title.string)
 
+    # 最後に取得できたページ内容を見返せるよう、正規化済み本文を最新状態として保存する。
+    # 日次履歴は残さず、latest_snapshots.raw_text に上書き保存する想定。
     body_text = normalize_text(soup.get_text(" "))
     status_flags = [kw for kw in END_KEYWORDS if kw in body_text]
 
@@ -68,4 +70,5 @@ def parse_html(html: str) -> dict:
         "status_text": ", ".join(status_flags) if status_flags else "掲載中の可能性",
         "contact_available": contact_available,
         "content_hash": content_hash,
+        "raw_text": body_text,
     }

@@ -39,6 +39,7 @@ def fetch_snapshot(url: str, timeout: int = 20) -> Snapshot:
                 status_text=f"HTTP {status_code}",
                 contact_available=None,
                 content_hash=f"HTTP_{status_code}",
+                raw_text="",
                 error=None,
             )
 
@@ -54,6 +55,7 @@ def fetch_snapshot(url: str, timeout: int = 20) -> Snapshot:
             status_text=parsed["status_text"],
             contact_available=parsed["contact_available"],
             content_hash=parsed["content_hash"],
+            raw_text=parsed["raw_text"],
             error=None,
         )
     except Exception as exc:
@@ -68,5 +70,6 @@ def fetch_snapshot(url: str, timeout: int = 20) -> Snapshot:
             status_text="取得失敗",
             contact_available=None,
             content_hash=f"ERROR_{type(exc).__name__}",
+            raw_text="",
             error=str(exc),
         )
