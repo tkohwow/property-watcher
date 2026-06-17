@@ -22,7 +22,7 @@ PRICE_PATTERNS = [
 
 PROPERTY_KEYWORDS = [
     "物件名", "価格", "販売価格", "間取り", "専有面積", "バルコニー", "所在階",
-    "階建", "向き", "所在地", "住所", "交通", "沿線", "駅", "徒歩", "管理費",
+    "その他面積", "階建", "向き", "所在地", "住所", "交通", "沿線", "駅", "徒歩", "管理費",
     "修繕積立金", "その他費用", "築年月", "築年数", "完成時期", "構造", "総戸数",
     "土地権利", "用途地域", "管理形態", "管理員", "現況", "引渡", "取引態様",
     "情報提供日", "次回更新日", "備考", "特徴", "設備", "リフォーム",
@@ -37,6 +37,11 @@ NOISE_KEYWORDS = [
     "注文住宅", "新築マンションを探す", "中古一戸建てを買う", "土地を買う",
     "賃貸マンションを借りる", "会社概要", "利用規約", "個人情報保護方針",
     "プライバシーポリシー", "Copyright", "Produced By Recruit",
+]
+
+NOISE_LABEL_KEYWORDS = [
+    "ご住所", "郵便番号", "物件価格", "金利", "頭金", "リフォームする",
+    "必須", "お名前", "電話番号", "メールアドレス",
 ]
 
 REMOVE_TAGS = [
@@ -86,6 +91,7 @@ def _property_name(soup: BeautifulSoup, page_title: str) -> str:
     h1 = soup.find("h1")
     if isinstance(h1, Tag):
         value = normalize_line(h1.get_text(" ", strip=True))
+        value = re.sub(r"\s+[0-9,]+\s*万円.*$", "", value).strip()
         if value and not _is_noise(value):
             return value
     return _meta_content(soup, property_name="og:title") or page_title
@@ -97,14 +103,25 @@ def _is_noise(line: str) -> bool:
     return any(keyword.lower() in line.lower() for keyword in NOISE_KEYWORDS)
 
 
+def _clean_label(label: str) -> str:
+    label = normalize_line(label)
+    label = re.sub(r"\s*ヒント\s*", "", label)
+    label = re.sub(r"\s*必須\s*", "", label)
+    return label.strip("：: ")
+
+
 def _is_property_label(label: str) -> bool:
-    compact = re.sub(r"[：:\s※*]+", "", label)
+    if any(keyword in label for keyword in NOISE_LABEL_KEYWORDS):
+        return False
+    compact = re.sub(r"[：:\s※*]+", "", _clean_label(label))
     return 1 <= len(compact) <= 30 and any(keyword in compact for keyword in PROPERTY_KEYWORDS)
 
 
 def _clean_value(value: str) -> str:
     value = normalize_line(value)
+    value = re.sub(r"\[\s*(?:乗り換え案内|■\s*周辺環境)\s*\]", "", value)
     value = re.sub(r"(?:\s*\n\s*)+", " / ", value)
+    value = re.sub(r"\s{2,}", " ", value)
     return value
 
 
@@ -124,12 +141,16 @@ def _extract_table_pairs(soup: BeautifulSoup) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     for row in soup.find_all("tr"):
         cells = row.find_all(["th", "td"], recursive=False)
-        if len(cells) < 2:
-            continue
-        label = _clean_value(cells[0].get_text(" ", strip=True))
-        value = _clean_value(" / ".join(cell.get_text(" ", strip=True) for cell in cells[1:]))
-        if _is_property_label(label) and value and value != label and not _is_noise(value):
-            pairs.append((label, value))
+        for index, cell in enumerate(cells):
+            if cell.name != "th":
+                continue
+            value_cell = next((candidate for candidate in cells[index + 1:] if candidate.name == "td"), None)
+            if not isinstance(value_cell, Tag):
+                continue
+            label = _clean_label(cell.get_text(" ", strip=True))
+            value = _clean_value(value_cell.get_text(" ", strip=True))
+            if _is_property_label(label) and value and value != label and not _is_noise(value):
+                pairs.append((label, value))
     return pairs
 
 
@@ -140,6 +161,7 @@ def _extract_definition_pairs(soup: BeautifulSoup) -> list[tuple[str, str]]:
         if not isinstance(dd, Tag):
             continue
         label = _clean_value(dt.get_text(" ", strip=True))
+        label = _clean_label(label)
         value = _clean_value(dd.get_text(" ", strip=True))
         if _is_property_label(label) and value and value != label and not _is_noise(value):
             pairs.append((label, value))
@@ -204,7 +226,8 @@ def _extract_features(soup: BeautifulSoup) -> list[str]:
             continue
         for item in container.find_all("li")[:40]:
             value = normalize_line(item.get_text(" ", strip=True))
-            if value and value not in seen and not _is_noise(value) and len(value) <= 80:
+            looks_like_caption = bool(re.search(r"万円|m\s*2|m2|㎡|間取図|画像|写真|ホームページ|乗り換え案内", value))
+            if value and value not in seen and not _is_noise(value) and not looks_like_caption and len(value) <= 40:
                 features.append(value)
                 seen.add(value)
     return features
@@ -250,8 +273,15 @@ def extract_clean_text(soup: BeautifulSoup, page_title: str) -> str:
         _add_line(lines, seen, f"物件名: {name}")
 
     pairs = _extract_json_ld(soup) + _extract_table_pairs(soup) + _extract_definition_pairs(soup)
+    seen_labels = {"物件名"} if name else set()
     for label, value in pairs:
-        _add_line(lines, seen, f"{normalize_line(label)}: {_clean_value(value)}")
+        label = _clean_label(label)
+        if label in seen_labels:
+            continue
+        before = len(lines)
+        _add_line(lines, seen, f"{label}: {_clean_value(value)}")
+        if len(lines) > before:
+            seen_labels.add(label)
 
     features = _extract_features(soup)
     if features:

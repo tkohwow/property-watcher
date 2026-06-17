@@ -40,6 +40,28 @@ class ParserTest(unittest.TestCase):
         self.assertNotIn("おすすめ物件", parsed["raw_text"])
         self.assertNotIn("住宅ローン", parsed["raw_text"])
 
+    def test_extracts_multiple_pairs_from_one_table_row(self):
+        html = """
+        <html><head><title>物件詳細</title></head><body>
+          <table>
+            <tr>
+              <th>専有面積 ヒント</th><td>50.1m2</td>
+              <th>その他面積 ヒント</th><td>バルコニー面積：8.91m2</td>
+            </tr>
+            <tr>
+              <th>ご住所 必須</th><td>郵便番号 ※ハイフンなしで入力</td>
+              <th>物件価格 万円</th><td>金利 年 0.50％ / 頭金 0万円</td>
+            </tr>
+          </table>
+        </body></html>
+        """
+        parsed = parse_html(html)
+        self.assertIn("専有面積: 50.1m2", parsed["raw_text"])
+        self.assertIn("その他面積: バルコニー面積：8.91m2", parsed["raw_text"])
+        self.assertNotIn("ご住所", parsed["raw_text"])
+        self.assertNotIn("物件価格 万円", parsed["raw_text"])
+        self.assertNotIn("金利", parsed["raw_text"])
+
     def test_uses_dt_dd_and_og_title_when_title_is_missing(self):
         html = """
         <html><head><meta property="og:title" content="テストマンション"></head><body>
