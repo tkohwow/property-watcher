@@ -1,17 +1,15 @@
 import hashlib
+import json
 import re
+from typing import Any
+
 from bs4 import BeautifulSoup
 from bs4.element import Tag
 
+
 END_KEYWORDS = [
-    "掲載終了",
-    "公開終了",
-    "販売終了",
-    "成約済",
-    "成約済み",
-    "募集終了",
-    "この物件は現在掲載されておりません",
-    "この物件は掲載が終了しました",
+    "掲載終了", "公開終了", "販売終了", "成約済", "成約済み", "募集終了",
+    "この物件は現在掲載されておりません", "この物件は掲載が終了しました",
     "お探しのページは見つかりません",
 ]
 
@@ -22,230 +20,262 @@ PRICE_PATTERNS = [
     re.compile(r"価格[^0-9]{0,10}([0-9,]+)"),
 ]
 
-# raw_text を見返す用途に不要なナビ・広告・おすすめ枠を落とすための汎用フィルタ。
-# サイトごとにDOM構造が違うため、まずは過剰に本文を消しすぎない範囲で共通ノイズを除去する。
-REMOVE_TAGS = [
-    "script",
-    "style",
-    "noscript",
-    "svg",
-    "header",
-    "footer",
-    "nav",
-    "aside",
-    "form",
-    "button",
-    "select",
-    "option",
-    "iframe",
+PROPERTY_KEYWORDS = [
+    "物件名", "価格", "販売価格", "間取り", "専有面積", "バルコニー", "所在階",
+    "階建", "向き", "所在地", "住所", "交通", "沿線", "駅", "徒歩", "管理費",
+    "修繕積立金", "その他費用", "築年月", "築年数", "完成時期", "構造", "総戸数",
+    "土地権利", "用途地域", "管理形態", "管理員", "現況", "引渡", "取引態様",
+    "情報提供日", "次回更新日", "備考", "特徴", "設備", "リフォーム",
+    "リノベーション", "ペット", "駐車場", "駐輪場", "バイク置場", "管理会社",
+    "施工", "分譲",
 ]
 
-REMOVE_ATTR_PATTERN = re.compile(
-    r"(header|footer|nav|breadcrumb|bread|menu|gnav|global|login|mypage|favorite|history|recent|"
-    r"recommend|relation|related|ranking|ad|ads|advert|banner|bnr|campaign|modal|popup|pager|"
-    r"pagination|side|sidebar|sns|share|search|condition|footer|assist|guide|pr)",
+NOISE_KEYWORDS = [
+    "ログイン", "マイページ", "お気に入り", "全国へ", "サイトマップ", "おすすめ物件",
+    "最近見た物件", "ランキング", "引越し見積もり", "住宅ローン", "返済",
+    "シミュレーション", "資料請求", "お問い合わせ", "無料",
+    "注文住宅", "新築マンションを探す", "中古一戸建てを買う", "土地を買う",
+    "賃貸マンションを借りる", "会社概要", "利用規約", "個人情報保護方針",
+    "プライバシーポリシー", "Copyright", "Produced By Recruit",
+]
+
+REMOVE_TAGS = [
+    "script", "style", "noscript", "svg", "header", "footer", "nav", "aside", "form",
+    "button", "select", "option", "iframe",
+]
+
+# 属性値を単語単位で見る。以前の `ad` の部分一致は main-detail などまで消し得た。
+NOISE_ATTR_TOKEN = re.compile(
+    r"(?:^|[-_\s])(breadcrumb|gnav|global-nav|login|mypage|favorite|history|recent|"
+    r"recommend|related|ranking|advert|advertisement|banner|bnr|campaign|modal|popup|"
+    r"pagination|sidebar|sns|share)(?:$|[-_\s])",
     re.IGNORECASE,
 )
 
-BOILERPLATE_LINE_PATTERNS = [
-    re.compile(p)
-    for p in [
-        r"^\s*$",
-        r"^SUUMO\b",
-        r"Produced By Recruit",
-        r"全国へ",
-        r"サイトマップ",
-        r"初めての方へ",
-        r"ログイン",
-        r"マイページ",
-        r"お気に入り",
-        r"閲覧履歴",
-        r"検索$",
-        r"検索条件",
-        r"資料請求する\s*\(無料\)",
-        r"問い合わせ先",
-        r"お問い合わせ先",
-        r"不動産会社ガイド",
-        r"住宅ローン",
-        r"無料査定",
-        r"引越し見積もり",
-        r"リフォーム",
-        r"注文住宅",
-        r"新築マンション",
-        r"中古マンションを買う",
-        r"中古一戸建てを買う",
-        r"土地を買う",
-        r"賃貸マンションを借りる",
-        r"この街の情報を見る",
-        r"資料請求・お問い合わせ",
-        r"お気に入りに追加しました",
-        r"あなたにオススメ",
-        r"おすすめ物件",
-        r"最近見た物件",
-        r"周辺の物件",
-        r"周辺環境",
-        r"会社概要",
-        r"個人情報保護方針",
-        r"利用規約",
-        r"免責事項",
-        r"Copyright",
-        r"©",
-    ]
-]
-
-# 物件情報として残したい可能性が高い語。raw_text はこれらを含む行を優先して残す。
-IMPORTANT_KEYWORDS = [
-    "物件名",
-    "価格",
-    "販売価格",
-    "間取り",
-    "専有面積",
-    "バルコニー",
-    "所在階",
-    "階建",
-    "向き",
-    "所在地",
-    "住所",
-    "交通",
-    "沿線",
-    "駅",
-    "徒歩",
-    "管理費",
-    "修繕積立金",
-    "築年月",
-    "築年数",
-    "完成時期",
-    "構造",
-    "総戸数",
-    "土地権利",
-    "用途地域",
-    "管理形態",
-    "管理員",
-    "現況",
-    "引渡",
-    "取引態様",
-    "備考",
-    "特徴",
-    "設備",
-    "リフォーム",
-    "リノベーション",
-    "ペット",
-    "駐車場",
-    "駐輪場",
-    "バイク置場",
-    "管理会社",
-    "施工",
-    "分譲",
-    "グラーサ中野坂上",
-]
+MAX_RAW_TEXT_CHARS = 12_000
+MAX_VALUE_CHARS = 600
 
 
 def normalize_text(text: str) -> str:
     text = re.sub(r"[\t\r\f\v]+", " ", text)
-    text = re.sub(r" +", " ", text)
+    text = re.sub(r"[ \u3000]+", " ", text)
     return text.strip()
 
 
 def normalize_line(text: str) -> str:
     text = normalize_text(text)
     text = re.sub(r"\s*([：:])\s*", r"\1", text)
-    return text.strip(" ｜|-/　")
+    return text.strip(" ｜|/　")
 
 
-def is_boilerplate_line(line: str) -> bool:
-    if not line:
+def _meta_content(soup: BeautifulSoup, *, property_name: str = "", name: str = "") -> str:
+    attrs = {"property": property_name} if property_name else {"name": name}
+    tag = soup.find("meta", attrs=attrs)
+    return normalize_line(str(tag.get("content", ""))) if isinstance(tag, Tag) else ""
+
+
+def _page_title(soup: BeautifulSoup) -> str:
+    if soup.title:
+        title = normalize_line(soup.title.get_text(" ", strip=True))
+        if title:
+            return title
+    return _meta_content(soup, property_name="og:title")
+
+
+def _property_name(soup: BeautifulSoup, page_title: str) -> str:
+    h1 = soup.find("h1")
+    if isinstance(h1, Tag):
+        value = normalize_line(h1.get_text(" ", strip=True))
+        if value and not _is_noise(value):
+            return value
+    return _meta_content(soup, property_name="og:title") or page_title
+
+
+def _is_noise(line: str) -> bool:
+    if not line or len(line) <= 1 or len(line) > MAX_VALUE_CHARS:
         return True
-    if len(line) <= 1:
-        return True
-    if len(line) > 220:
-        # 1行が長すぎるものは、ナビ・免責・おすすめ枠が連結した可能性が高い。
-        return True
-    return any(pattern.search(line) for pattern in BOILERPLATE_LINE_PATTERNS)
+    return any(keyword.lower() in line.lower() for keyword in NOISE_KEYWORDS)
 
 
-def element_attr_text(tag: Tag) -> str:
-    values: list[str] = []
-    for attr in ("id", "class", "role", "aria-label", "data-testid"):
-        value = tag.get(attr)
-        if isinstance(value, list):
-            values.extend(str(v) for v in value)
-        elif value:
-            values.append(str(value))
-    return " ".join(values)
+def _is_property_label(label: str) -> bool:
+    compact = re.sub(r"[：:\s※*]+", "", label)
+    return 1 <= len(compact) <= 30 and any(keyword in compact for keyword in PROPERTY_KEYWORDS)
 
 
-def remove_noise_elements(soup: BeautifulSoup) -> None:
+def _clean_value(value: str) -> str:
+    value = normalize_line(value)
+    value = re.sub(r"(?:\s*\n\s*)+", " / ", value)
+    return value
+
+
+def _add_line(lines: list[str], seen: set[str], line: str) -> None:
+    line = normalize_line(line)
+    # 保存テキストは人が読むものなので、ラベル区切りを見やすく統一する。
+    line = re.sub(r"^([^:：\n]+)[:：](.*)$", lambda match: f"{match.group(1)}: {match.group(2).strip()}", line)
+    if _is_noise(line) or line in seen:
+        return
+    if sum(len(item) + 1 for item in lines) + len(line) > MAX_RAW_TEXT_CHARS:
+        return
+    lines.append(line)
+    seen.add(line)
+
+
+def _extract_table_pairs(soup: BeautifulSoup) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for row in soup.find_all("tr"):
+        cells = row.find_all(["th", "td"], recursive=False)
+        if len(cells) < 2:
+            continue
+        label = _clean_value(cells[0].get_text(" ", strip=True))
+        value = _clean_value(" / ".join(cell.get_text(" ", strip=True) for cell in cells[1:]))
+        if _is_property_label(label) and value and value != label and not _is_noise(value):
+            pairs.append((label, value))
+    return pairs
+
+
+def _extract_definition_pairs(soup: BeautifulSoup) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for dt in soup.find_all("dt"):
+        dd = dt.find_next_sibling("dd")
+        if not isinstance(dd, Tag):
+            continue
+        label = _clean_value(dt.get_text(" ", strip=True))
+        value = _clean_value(dd.get_text(" ", strip=True))
+        if _is_property_label(label) and value and value != label and not _is_noise(value):
+            pairs.append((label, value))
+    return pairs
+
+
+def _walk_json(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_json(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_json(child)
+
+
+def _extract_json_ld(soup: BeautifulSoup) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    label_map = {
+        "name": "物件名", "address": "所在地", "floorSize": "専有面積",
+        "numberOfRooms": "間取り", "datePosted": "情報提供日",
+    }
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            data = json.loads(tag.string or tag.get_text())
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for obj in _walk_json(data):
+            object_type = obj.get("@type", "")
+            types = object_type if isinstance(object_type, list) else [object_type]
+            # BreadcrumbList や Organization の name/address を物件情報として混ぜない。
+            if not any(str(value).lower() in {
+                "product", "apartment", "accommodation", "residence", "house",
+                "singlefamilyresidence", "realestatelisting",
+            } for value in types):
+                continue
+            for key, label in label_map.items():
+                value = obj.get(key)
+                if isinstance(value, dict):
+                    value = value.get("name") or value.get("value") or value.get("streetAddress")
+                if isinstance(value, (str, int, float)):
+                    pairs.append((label, str(value)))
+            offers = obj.get("offers")
+            if isinstance(offers, dict) and offers.get("price"):
+                price = str(offers["price"])
+                if offers.get("priceCurrency") == "JPY" and re.fullmatch(r"\d+(?:\.0+)?", price):
+                    yen = int(float(price))
+                    price = f"{yen // 10_000:,}万円" if yen >= 1_000_000 and yen % 10_000 == 0 else f"{yen:,}円"
+                pairs.append(("価格", price))
+    return pairs
+
+
+def _extract_features(soup: BeautifulSoup) -> list[str]:
+    features: list[str] = []
+    seen: set[str] = set()
+    for heading in soup.find_all(re.compile(r"^h[2-6]$")):
+        heading_text = normalize_line(heading.get_text(" ", strip=True))
+        if not any(word in heading_text for word in ("特徴", "設備")):
+            continue
+        container = heading.find_next_sibling()
+        if not isinstance(container, Tag):
+            continue
+        for item in container.find_all("li")[:40]:
+            value = normalize_line(item.get_text(" ", strip=True))
+            if value and value not in seen and not _is_noise(value) and len(value) <= 80:
+                features.append(value)
+                seen.add(value)
+    return features
+
+
+def _remove_noise_elements(soup: BeautifulSoup) -> None:
     for tag in soup(REMOVE_TAGS):
         tag.decompose()
-
     for tag in list(soup.find_all(True)):
-        if not isinstance(tag, Tag):
-            continue
-        attrs = element_attr_text(tag)
-        if attrs and REMOVE_ATTR_PATTERN.search(attrs):
+        values: list[str] = []
+        for attr in ("id", "class", "role", "aria-label"):
+            value = tag.get(attr)
+            values.extend(value if isinstance(value, list) else [str(value)] if value else [])
+        if values and NOISE_ATTR_TOKEN.search(" ".join(values)):
             tag.decompose()
 
 
-def extract_clean_text(soup: BeautifulSoup, title: str) -> str:
-    # 改行区切りで抽出し、UI文言・広告・ナビをできるだけ落とす。
-    raw_lines = soup.get_text("\n").splitlines()
-    cleaned: list[str] = []
-    seen: set[str] = set()
-
-    if title:
-        cleaned.append(title)
-        seen.add(title)
-
-    for raw in raw_lines:
+def _extract_keyword_fallback(soup: BeautifulSoup) -> list[str]:
+    # 概要表のないサイト向け。物件語や明確な値を含む行だけに限定する。
+    fallback: list[str] = []
+    for raw in soup.get_text("\n").splitlines():
         line = normalize_line(raw)
-        if is_boilerplate_line(line):
-            continue
-        if line in seen:
-            continue
-
-        # 物件詳細っぽい行、または短めの説明文だけ残す。
-        # これにより、SUUMOのフッター・広告・検索導線をかなり削る。
-        has_important_keyword = any(keyword in line for keyword in IMPORTANT_KEYWORDS)
-        looks_like_price = bool(re.search(r"[0-9,]+\s*万円", line))
-        looks_like_station = bool(re.search(r"徒歩\d+分|歩\d+分", line))
-        looks_like_area = bool(re.search(r"\d+(?:\.\d+)?\s*(?:m2|㎡)", line))
-        looks_like_year = bool(re.search(r"\d{4}年\d{1,2}月|築\d+年", line))
-
-        if has_important_keyword or looks_like_price or looks_like_station or looks_like_area or looks_like_year:
-            cleaned.append(line)
-            seen.add(line)
-            continue
-
-        # 短い説明文は残す。ただし一般ナビっぽいものは上で落とす。
-        if 8 <= len(line) <= 80:
-            cleaned.append(line)
-            seen.add(line)
-
-    # あまりにも少ない場合は、最低限の本文を残す。
-    if len(cleaned) <= 3:
-        fallback = []
-        seen_fallback = set()
-        for raw in raw_lines:
-            line = normalize_line(raw)
-            if is_boilerplate_line(line) or line in seen_fallback:
-                continue
+        looks_like_value = bool(re.search(
+            r"[0-9,]+\s*万円|\d+(?:\.\d+)?\s*(?:m2|㎡)|徒歩\s*\d+分|歩\s*\d+分|"
+            r"\d{4}年\d{1,2}月|\b[1-9]\d*LDK\b",
+            line,
+            re.IGNORECASE,
+        ))
+        if (any(word in line for word in PROPERTY_KEYWORDS) or looks_like_value) and not _is_noise(line):
             fallback.append(line)
-            seen_fallback.add(line)
-            if len(fallback) >= 120:
-                break
-        cleaned = fallback
+    return fallback
 
-    return "\n".join(cleaned[:180]).strip()
+
+def extract_clean_text(soup: BeautifulSoup, page_title: str) -> str:
+    lines: list[str] = []
+    seen: set[str] = set()
+    name = _property_name(soup, page_title)
+    if name:
+        _add_line(lines, seen, f"物件名: {name}")
+
+    pairs = _extract_json_ld(soup) + _extract_table_pairs(soup) + _extract_definition_pairs(soup)
+    for label, value in pairs:
+        _add_line(lines, seen, f"{normalize_line(label)}: {_clean_value(value)}")
+
+    features = _extract_features(soup)
+    if features:
+        _add_line(lines, seen, "特徴:")
+        for feature in features:
+            _add_line(lines, seen, f"- {feature}")
+
+    # 構造化情報が乏しい場合のみ description とキーワード行で補完する。
+    if len(lines) < 5:
+        description = _meta_content(soup, name="description") or _meta_content(soup, property_name="og:description")
+        if description and not _is_noise(description):
+            _add_line(lines, seen, f"概要: {description}")
+
+        if not pairs:
+            fallback_soup = BeautifulSoup(str(soup), "lxml")
+            _remove_noise_elements(fallback_soup)
+            for line in _extract_keyword_fallback(fallback_soup):
+                _add_line(lines, seen, line)
+
+    return "\n".join(lines).strip()
 
 
 def extract_price(text: str) -> int | None:
-    # 「管理費1万」などの小さい金額を拾いにくくするため、100万円以上を価格候補にする
     candidates: list[int] = []
     for pattern in PRICE_PATTERNS:
         for match in pattern.finditer(text):
-            raw = match.group(1).replace(",", "")
             try:
-                value = int(raw)
+                value = int(match.group(1).replace(",", ""))
             except ValueError:
                 continue
             if value >= 100:
@@ -255,32 +285,17 @@ def extract_price(text: str) -> int | None:
 
 def parse_html(html: str) -> dict:
     soup = BeautifulSoup(html, "lxml")
-
-    # 価格・掲載終了・問い合わせ有無の判定は、ノイズ除去前の本文も使う。
     full_text = normalize_text(soup.get_text(" "))
-
-    title = ""
-    if soup.title and soup.title.string:
-        title = normalize_text(soup.title.string)
-
-    remove_noise_elements(soup)
+    title = _page_title(soup)
     clean_text = extract_clean_text(soup, title)
-
-    status_flags = [kw for kw in END_KEYWORDS if kw in full_text]
-
-    contact_available = None
-    if full_text:
-        contact_available = any(kw in full_text for kw in CONTACT_KEYWORDS)
-
-    # content_hash は通知には使わないが、最新本文の変化確認用に残す。
-    # 動的要素を除去した clean_text をhash化することで、DB上の揺れも抑える。
-    content_hash = hashlib.sha256(clean_text.encode("utf-8", errors="ignore")).hexdigest()
+    status_flags = [keyword for keyword in END_KEYWORDS if keyword in full_text]
 
     return {
         "title": title,
-        "price": extract_price(full_text),
+        # 構造化済み本文を先に見ることで、広告中の価格を拾いにくくする。
+        "price": extract_price(clean_text) or extract_price(full_text),
         "status_text": ", ".join(status_flags) if status_flags else "掲載中の可能性",
-        "contact_available": contact_available,
-        "content_hash": content_hash,
+        "contact_available": any(keyword in full_text for keyword in CONTACT_KEYWORDS) if full_text else None,
+        "content_hash": hashlib.sha256(clean_text.encode("utf-8", errors="ignore")).hexdigest(),
         "raw_text": clean_text,
     }
