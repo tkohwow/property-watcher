@@ -43,8 +43,10 @@ def compare(target: PropertyTarget, previous: Row | None, current: Snapshot) -> 
     if old_contact != new_contact:
         events.append(_event(target, current, "medium", "contact_changed", "問い合わせ導線の有無が変わりました", old_contact, new_contact))
 
-    if previous["content_hash"] != current.content_hash and not events:
-        events.append(_event(target, current, "low", "content_changed", "本文に何らかの変化がありました", previous["content_hash"][:12], current.content_hash[:12]))
+    # 本文全体のhashは、広告・おすすめ枠・トラッキングパラメータ・掲載件数などの
+    # 動的要素で毎回変わることがあるため、メール通知の対象にしない。
+    # latest_snapshots には最新状態を上書き保存するので、後から raw_text の確認は可能。
+    # 価格・タイトル・掲載状態・問い合わせ導線・HTTP状態などの明確な変化だけ通知する。
 
     return events
 
