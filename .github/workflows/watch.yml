@@ -26,6 +26,40 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+
+
+      - name: Send test email
+        run: |
+          python - <<'PY'
+          import os
+          import smtplib
+          from email.mime.text import MIMEText
+
+          gmail_user = os.environ["GMAIL_USER"]
+          gmail_app_password = os.environ["GMAIL_APP_PASSWORD"]
+          notify_to = os.environ["NOTIFY_TO"]
+
+          msg = MIMEText("property-watcher のGmail通知テストです。", "plain", "utf-8")
+          msg["Subject"] = "property-watcher test"
+          msg["From"] = gmail_user
+          msg["To"] = notify_to
+
+          with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+              server.login(gmail_user, gmail_app_password)
+              server.send_message(msg)
+
+          print("Test email sent")
+          PY
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+
+
+
+
+
+
       - name: Run watcher
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
