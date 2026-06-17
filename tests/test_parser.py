@@ -79,6 +79,17 @@ class ParserTest(unittest.TestCase):
         self.assertIn("物件名: 物件詳細", parsed["raw_text"])
         self.assertIn("3,980万円", parsed["raw_text"])
 
+    def test_fallback_handles_children_of_decomposed_noise_elements(self):
+        html = """
+        <html><head><title>物件詳細</title></head><body>
+          <header><div><span>ログイン</span></div></header>
+          <main><p>価格 4,500万円</p><p>専有面積 55㎡</p></main>
+        </body></html>
+        """
+        parsed = parse_html(html)
+        self.assertEqual(parsed["price"], 4500)
+        self.assertNotIn("ログイン", parsed["raw_text"])
+
 
 if __name__ == "__main__":
     unittest.main()

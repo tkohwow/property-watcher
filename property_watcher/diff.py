@@ -16,10 +16,43 @@ def compare(target: PropertyTarget, previous: Row | None, current: Snapshot) -> 
             _event(target, current, "info", "first_seen", "初回スナップショットを保存しました", None, current.status_text)
         ]
 
-    events: list[dict] = []
+    previous_ok = bool(previous["ok"])
 
-    if int(previous["ok"]) != int(current.ok):
-        events.append(_event(target, current, "high", "availability_changed", "ページ取得状態が変わりました", previous["ok"], int(current.ok)))
+    # 取得失敗時は title/price/status/contact が空になるが、それらは物件の変更ではない。
+    # 取得可否だけを1イベントにまとめ、空値との比較による大量通知を防ぐ。
+    if previous_ok and not current.ok:
+        reason = current.error or current.status_text
+        return [
+            _event(
+                target,
+                current,
+                "high" if current.status_code in (404, 410) else "medium",
+                "availability_changed",
+                "ページを取得できなくなりました",
+                previous["status_code"],
+                reason,
+            )
+        ]
+
+    # 復旧時も、失敗スナップショットの空値とは比較しない。復旧通知1件だけにする。
+    if not previous_ok and current.ok:
+        return [
+            _event(
+                target,
+                current,
+                "info",
+                "availability_restored",
+                "ページを再び取得できました",
+                previous["error"] or previous["status_text"],
+                current.status_code,
+            )
+        ]
+
+    # 連続する取得失敗は同じ異常を繰り返し通知しない。
+    if not previous_ok and not current.ok:
+        return []
+
+    events: list[dict] = []
 
     if previous["status_code"] != current.status_code:
         severity = "high" if current.status_code in (404, 410) else "medium"

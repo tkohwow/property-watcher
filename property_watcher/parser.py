@@ -214,6 +214,10 @@ def _remove_noise_elements(soup: BeautifulSoup) -> None:
     for tag in soup(REMOVE_TAGS):
         tag.decompose()
     for tag in list(soup.find_all(True)):
+        # 親要素を decompose() すると、先に列挙済みの子要素も attrs=None の
+        # 破棄済みTagになる。そこへ tag.get() すると BeautifulSoup 内で例外になる。
+        if tag.attrs is None:
+            continue
         values: list[str] = []
         for attr in ("id", "class", "role", "aria-label"):
             value = tag.get(attr)
