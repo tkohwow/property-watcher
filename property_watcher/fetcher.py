@@ -11,7 +11,7 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def fetch_snapshot(url: str, timeout: int = 20) -> Snapshot:
+def fetch_snapshot_with_html(url: str, timeout: int = 20) -> tuple[Snapshot, str | None]:
     fetched_at = now_iso()
     try:
         response = requests.get(
@@ -41,7 +41,7 @@ def fetch_snapshot(url: str, timeout: int = 20) -> Snapshot:
                 content_hash=f"HTTP_{status_code}",
                 raw_text="",
                 error=None,
-            )
+            ), response.text
 
         parsed = parse_html(response.text)
         return Snapshot(
@@ -57,7 +57,7 @@ def fetch_snapshot(url: str, timeout: int = 20) -> Snapshot:
             content_hash=parsed["content_hash"],
             raw_text=parsed["raw_text"],
             error=None,
-        )
+        ), response.text
     except Exception as exc:
         return Snapshot(
             url=url,
@@ -72,4 +72,9 @@ def fetch_snapshot(url: str, timeout: int = 20) -> Snapshot:
             content_hash=f"ERROR_{type(exc).__name__}",
             raw_text="",
             error=str(exc),
-        )
+        ), None
+
+
+def fetch_snapshot(url: str, timeout: int = 20) -> Snapshot:
+    snapshot, _ = fetch_snapshot_with_html(url, timeout=timeout)
+    return snapshot

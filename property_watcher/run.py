@@ -3,9 +3,13 @@ import csv
 import time
 from pathlib import Path
 
-from .db import connect, upsert_target, get_latest_snapshot, upsert_latest_snapshot, insert_events
+from .db import (
+    connect, get_latest_snapshot, has_image_archive_attempt, insert_events,
+    insert_property_images, mark_image_archive_attempt, upsert_latest_snapshot, upsert_target,
+)
 from .diff import compare
-from .fetcher import fetch_snapshot
+from .fetcher import fetch_snapshot_with_html
+from .image_archive import archive_property_images
 from .models import PropertyTarget
 from .notifier import notify_gmail, format_event
 
@@ -33,6 +37,13 @@ def main() -> None:
     parser.add_argument("--csv", default="properties.csv", help="監視対象CSV")
     parser.add_argument("--db", default="property_watcher.db", help="SQLite DB path")
     parser.add_argument("--sleep", type=float, default=3.0, help="URLごとの待機秒数")
+    parser.add_argument(
+        "--images",
+        choices=("initial", "refresh", "off"),
+        default="initial",
+        help="室内写真: initial=未実施物件のみ, refresh=再取得, off=取得しない",
+    )
+    parser.add_argument("--image-dir", default="property_images", help="画像の保存先")
     args = parser.parse_args()
 
     if not Path(args.csv).exists():
@@ -49,7 +60,10 @@ def main() -> None:
         print(f"[{index + 1}/{len(targets)}] Fetching {target.name}: {target.url}")
         upsert_target(conn, target.url, target.name, target.memo)
         previous = get_latest_snapshot(conn, target.url)
-        current = fetch_snapshot(target.url)
+        should_archive = args.images == "refresh" or (
+            args.images == "initial" and not has_image_archive_attempt(conn, target.url)
+        )
+        current, html = fetch_snapshot_with_html(target.url)
         events = compare(target, previous, current)
 
         upsert_latest_snapshot(conn, current)
@@ -65,6 +79,16 @@ def main() -> None:
                     body=format_event(target, current, event),
                 )
                 print(event["message"])
+
+        if should_archive and current.ok and html:
+            print(f"Archiving indoor images for {target.name}...")
+            result = archive_property_images(html, target.url, target.name, root_dir=args.image_dir)
+            insert_property_images(conn, target.url, result.images)
+            error = "\n".join(result.errors) if result.errors else None
+            mark_image_archive_attempt(conn, target.url, current.fetched_at, len(result.images), error)
+            print(f"Archived {len(result.images)} indoor image(s).")
+            for archive_error in result.errors:
+                print(f"Image skipped: {archive_error}")
 
         conn.commit()
 

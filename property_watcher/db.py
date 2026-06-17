@@ -64,6 +64,32 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_url_id ON events(url, id);
+
+-- 室内写真の実体はproperty_images/に置き、DBには検索可能なメタデータを保存する。
+CREATE TABLE IF NOT EXISTS property_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    caption TEXT,
+    image_type TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    local_path TEXT NOT NULL UNIQUE,
+    content_hash TEXT NOT NULL,
+    saved_at TEXT NOT NULL,
+    UNIQUE(url, content_hash),
+    FOREIGN KEY(url) REFERENCES targets(url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_property_images_url ON property_images(url, position);
+
+-- 初回保存済みかを画像件数とは別に記録し、日次で再ダウンロードしない。
+CREATE TABLE IF NOT EXISTS image_archive_status (
+    url TEXT PRIMARY KEY,
+    attempted_at TEXT NOT NULL,
+    saved_count INTEGER NOT NULL,
+    error TEXT,
+    FOREIGN KEY(url) REFERENCES targets(url)
+);
 """
 
 
@@ -148,4 +174,55 @@ def insert_events(conn: sqlite3.Connection, events: Iterable[dict]) -> None:
         VALUES (:url, :occurred_at, :severity, :event_type, :message, :old_value, :new_value)
         """,
         list(events),
+    )
+
+
+def has_image_archive_attempt(conn: sqlite3.Connection, url: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM image_archive_status WHERE url = ? LIMIT 1",
+        (url,),
+    ).fetchone() is not None
+
+
+def insert_property_images(conn: sqlite3.Connection, url: str, images: Iterable) -> None:
+    conn.executemany(
+        """
+        INSERT INTO property_images(
+            url, source_url, caption, image_type, position, local_path, content_hash, saved_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(url, content_hash) DO UPDATE SET
+            source_url = excluded.source_url,
+            caption = excluded.caption,
+            image_type = excluded.image_type,
+            position = excluded.position,
+            local_path = excluded.local_path,
+            saved_at = excluded.saved_at
+        """,
+        [
+            (
+                url, image.source_url, image.caption, image.image_type, image.position,
+                image.local_path, image.content_hash, image.saved_at,
+            )
+            for image in images
+        ],
+    )
+
+
+def mark_image_archive_attempt(
+    conn: sqlite3.Connection,
+    url: str,
+    attempted_at: str,
+    saved_count: int,
+    error: str | None,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO image_archive_status(url, attempted_at, saved_count, error)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(url) DO UPDATE SET
+            attempted_at = excluded.attempted_at,
+            saved_count = excluded.saved_count,
+            error = excluded.error
+        """,
+        (url, attempted_at, saved_count, error),
     )

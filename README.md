@@ -115,6 +115,24 @@ SUUMOなどのページは広告、レコメンド、トラッキング、表示
 
 本文の最新内容は `latest_snapshots.raw_text` に上書き保存されます。
 
+## 室内写真の保存
+
+SUUMOの室内写真は掲載終了後に元URLが無効になる可能性があるため、縮小JPEGをprivate repository内の `property_images/` に保存できます。DBの `property_images` テーブルには元URL、キャプション、種別、ローカルパス、画像ハッシュを記録します。画像は私的な記録に限定し、再公開しないでください。
+
+通常の日次実行は `--images initial` で、物件ごとに最初の1回だけ室内写真を保存します。保存実施済みかどうかは `image_archive_status` テーブルで管理するため、翌日以降は画像へアクセスしません。
+
+GitHub Actionsを手動実行するときは `image_mode` を選べます。
+
+- `initial`: 未保存の物件だけ保存（通常はこちら）
+- `refresh`: 全物件の室内写真を任意に再取得
+- `off`: 写真を取得しない
+
+ローカルで任意に再取得する場合:
+
+```bash
+python -m property_watcher.run --csv properties.csv --db property_watcher.db --images refresh
+```
+
 ## raw_text のクリーニング
 
 `latest_snapshots.raw_text` はHTML全文ではなく、物件概要テーブル、`dt/dd`、JSON-LD、物件名、特徴・設備を優先して整形したテキストです。構造化情報が少ないページでは、物件情報らしいキーワードを含む行だけを補完します。
