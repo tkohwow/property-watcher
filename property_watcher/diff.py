@@ -4,6 +4,13 @@ from sqlite3 import Row
 from .models import Snapshot, PropertyTarget
 
 
+ACTIVE_STATUS = "掲載中の可能性"
+
+
+def _is_listing_ended(status_text: str | None) -> bool:
+    return bool(status_text and status_text != ACTIVE_STATUS)
+
+
 def _stringify(value) -> str | None:
     if value is None:
         return None
@@ -50,6 +57,41 @@ def compare(target: PropertyTarget, previous: Row | None, current: Snapshot) -> 
 
     # 連続する取得失敗は同じ異常を繰り返し通知しない。
     if not previous_ok and not current.ok:
+        return []
+
+    previous_ended = _is_listing_ended(previous["status_text"])
+    current_ended = _is_listing_ended(current.status_text)
+
+    # HTTP 200のまま終了案内に差し替えるサイトがある。
+    # 価格やタイトルの消失を別イベントにせず、終了1件にまとめる。
+    if not previous_ended and current_ended:
+        return [
+            _event(
+                target,
+                current,
+                "high",
+                "listing_ended",
+                "掲載が終了した可能性があります",
+                previous["status_text"],
+                current.status_text,
+            )
+        ]
+
+    if previous_ended and not current_ended:
+        return [
+            _event(
+                target,
+                current,
+                "info",
+                "listing_restored",
+                "掲載が再開された可能性があります",
+                previous["status_text"],
+                current.status_text,
+            )
+        ]
+
+    # 終了案内のページ内容が変わっても再通知しない。
+    if previous_ended and current_ended:
         return []
 
     events: list[dict] = []

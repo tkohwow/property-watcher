@@ -112,6 +112,28 @@ class ParserTest(unittest.TestCase):
         self.assertEqual(parsed["price"], 4500)
         self.assertNotIn("ログイン", parsed["raw_text"])
 
+    def test_detects_listing_end_page_returned_with_http_200(self):
+        html = """
+        <html><head><title>物件情報</title></head><body>
+          <main><h1>この物件の掲載は終了しました</h1></main>
+        </body></html>
+        """
+
+        parsed = parse_html(html)
+
+        self.assertIn("掲載は終了", parsed["status_text"])
+
+    def test_detects_missing_property_page_returned_with_http_200(self):
+        html = """
+        <html><head><title>物件をお探しの方へ</title></head><body>
+          <main><p>物件情報が見つかりません</p></main>
+        </body></html>
+        """
+
+        parsed = parse_html(html)
+
+        self.assertIn("物件情報が見つかりません", parsed["status_text"])
+
 
 if __name__ == "__main__":
     unittest.main()

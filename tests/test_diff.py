@@ -68,6 +68,52 @@ class DiffTest(unittest.TestCase):
         )
         self.assertEqual(compare(TARGET, row(failed), failed), [])
 
+    def test_http_410_produces_high_availability_event(self):
+        current = snapshot(
+            ok=False, status_code=410, title="", price=None,
+            status_text="HTTP 410", contact_available=None,
+        )
+
+        events = compare(TARGET, row(snapshot()), current)
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_type"], "availability_changed")
+        self.assertEqual(events[0]["severity"], "high")
+
+    def test_ended_page_produces_one_high_event(self):
+        current = snapshot(
+            title="物件情報", price=None,
+            status_text="この物件の掲載は終了しました",
+            contact_available=False,
+        )
+
+        events = compare(TARGET, row(snapshot()), current)
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_type"], "listing_ended")
+        self.assertEqual(events[0]["severity"], "high")
+
+    def test_ended_page_does_not_notify_repeatedly(self):
+        ended = snapshot(
+            title="物件情報", price=None,
+            status_text="この物件の掲載は終了しました",
+            contact_available=False,
+        )
+
+        self.assertEqual(compare(TARGET, row(ended), ended), [])
+
+    def test_listing_restoration_produces_one_event(self):
+        ended = snapshot(
+            title="物件情報", price=None,
+            status_text="この物件の掲載は終了しました",
+            contact_available=False,
+        )
+
+        events = compare(TARGET, row(ended), snapshot())
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_type"], "listing_restored")
+
 
 if __name__ == "__main__":
     unittest.main()
