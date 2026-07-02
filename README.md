@@ -133,6 +133,18 @@ GitHub Actionsを手動実行するときは `image_mode` を選べます。
 python -m property_watcher.run --csv properties.csv --db property_watcher.db --images refresh
 ```
 
+## 簡易Web画面
+
+ローカルで監視状況を見るだけの簡易ダッシュボードを起動できます。
+
+```bash
+python -m property_watcher.web --db property_watcher.db --image-dir property_images
+```
+
+起動後、ブラウザで `http://127.0.0.1:8000/` を開きます。
+
+一覧では監視中の物件、最新価格、掲載状態、HTTP状態、問い合わせ導線、保存写真数、最近のイベントを確認できます。物件名をクリックすると、詳細・イベント履歴・保存済み室内写真・最新テキストを確認できます。
+
 ## raw_text のクリーニング
 
 `latest_snapshots.raw_text` はHTML全文ではなく、物件概要テーブル、`dt/dd`、JSON-LD、物件名、特徴・設備を優先して整形したテキストです。構造化情報が少ないページでは、物件情報らしいキーワードを含む行だけを補完します。
