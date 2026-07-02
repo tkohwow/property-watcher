@@ -145,6 +145,18 @@ python -m property_watcher.web --db property_watcher.db --image-dir property_ima
 
 一覧では監視中の物件、最新価格、掲載状態、HTTP状態、問い合わせ導線、保存写真数、最近のイベントを確認できます。物件名をクリックすると、詳細・イベント履歴・保存済み室内写真・最新テキストを確認できます。
 
+### GitHub Pages で見る
+
+GitHub Pages ではPythonサーバーやSQLiteを直接動かせないため、Actionsで `property_watcher.db` から静的HTMLを書き出して公開します。
+
+```bash
+python -m property_watcher.pages --db property_watcher.db --image-dir property_images --out site
+```
+
+`.github/workflows/pages.yml` により、`main` にDB・写真・CSV・Pages生成コードの変更がpushされると自動でGitHub Pagesへデプロイされます。GitHubの `Settings > Pages` で source が `GitHub Actions` になっている必要があります。
+
+注意: GitHub Pagesの公開範囲はリポジトリ/アカウントの設定やプランに依存します。保存済み室内写真や物件メモも公開HTMLに含まれるため、公開範囲を確認してから使ってください。
+
 ## raw_text のクリーニング
 
 `latest_snapshots.raw_text` はHTML全文ではなく、物件概要テーブル、`dt/dd`、JSON-LD、物件名、特徴・設備を優先して整形したテキストです。構造化情報が少ないページでは、物件情報らしいキーワードを含む行だけを補完します。
