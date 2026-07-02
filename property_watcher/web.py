@@ -1,6 +1,5 @@
 import argparse
 import mimetypes
-import socket
 import sqlite3
 from html import escape
 from http import HTTPStatus
@@ -41,29 +40,6 @@ def short_text(value: str | None, limit: int = 160) -> str:
         return ""
     value = " ".join(value.split())
     return value if len(value) <= limit else value[:limit] + "..."
-
-
-def lan_addresses(port: int) -> list[str]:
-    addresses: set[str] = set()
-    try:
-        hostname = socket.gethostname()
-        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
-            address = info[4][0]
-            if not address.startswith("127."):
-                addresses.add(address)
-    except OSError:
-        pass
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.connect(("8.8.8.8", 80))
-            address = sock.getsockname()[0]
-            if not address.startswith("127."):
-                addresses.add(address)
-    except OSError:
-        pass
-
-    return [f"http://{address}:{port}/" for address in sorted(addresses)]
 
 
 class Dashboard:
@@ -420,11 +396,7 @@ def main() -> None:
     parser.add_argument("--image-dir", default="property_images", help="saved image directory")
     parser.add_argument("--host", default="127.0.0.1", help="bind host")
     parser.add_argument("--port", type=int, default=8000, help="bind port")
-    parser.add_argument("--mobile", action="store_true", help="bind to 0.0.0.0 and print LAN URLs")
     args = parser.parse_args()
-
-    if args.mobile and args.host == "127.0.0.1":
-        args.host = "0.0.0.0"
 
     if not Path(args.db).exists():
         raise SystemExit(f"DB not found: {args.db}")
@@ -432,14 +404,6 @@ def main() -> None:
     Handler.dashboard = Dashboard(args.db, args.image_dir)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Serving Property Watcher dashboard at http://{args.host}:{args.port}/")
-    if args.mobile:
-        urls = lan_addresses(args.port)
-        if urls:
-            print("Open one of these URLs from a phone on the same Wi-Fi:")
-            for url in urls:
-                print(f"  {url}")
-        else:
-            print("Could not detect a LAN IP. Check your PC's Wi-Fi IPv4 address.")
     server.serve_forever()
 
 
