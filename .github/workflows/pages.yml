@@ -2,16 +2,6 @@ name: Publish Pages
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - properties.csv
-      - property_watcher.db
-      - property_images/**
-      - property_watcher/pages.py
-      - property_watcher/web.py
-      - .github/workflows/pages.yml
 
 permissions:
   contents: read

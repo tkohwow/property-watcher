@@ -153,9 +153,11 @@ GitHub Pages ではPythonサーバーやSQLiteを直接動かせないため、A
 python -m property_watcher.pages --db property_watcher.db --image-dir property_images --out site
 ```
 
-`.github/workflows/pages.yml` により、`main` にDB・写真・CSV・Pages生成コードの変更がpushされると自動でGitHub Pagesへデプロイされます。GitHubの `Settings > Pages` で source が `GitHub Actions` になっている必要があります。
+`.github/workflows/pages.yml` を手動実行すると、静的HTMLをGitHub Pagesへデプロイします。GitHubの `Settings > Pages` で source が `GitHub Actions` になっている必要があります。
 
 注意: GitHub Pagesの公開範囲はリポジトリ/アカウントの設定やプランに依存します。保存済み室内写真や物件メモも公開HTMLに含まれるため、公開範囲を確認してから使ってください。
+
+このリポジトリがprivateのまま現在のGitHubプランでPagesを有効化できない場合があります。その場合は、リポジトリをpublicにする、Pages対応プランに変更する、または別の公開用リポジトリ/ホスティング先へ `site/` を配置してください。
 
 ## raw_text のクリーニング
 
