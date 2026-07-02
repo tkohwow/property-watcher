@@ -1,5 +1,6 @@
 import argparse
 import mimetypes
+import socket
 import sqlite3
 from html import escape
 from http import HTTPStatus
@@ -16,14 +17,14 @@ def open_db(db_path: str) -> sqlite3.Connection:
 
 def yen(value) -> str:
     if value is None:
-        return "不明"
-    return f"{int(value):,}万円"
+        return "unknown"
+    return f"{int(value):,} man yen"
 
 
 def yes_no(value) -> str:
     if value is None:
-        return "不明"
-    return "あり" if int(value) else "なし"
+        return "unknown"
+    return "yes" if int(value) else "no"
 
 
 def severity_class(severity: str | None) -> str:
@@ -40,6 +41,29 @@ def short_text(value: str | None, limit: int = 160) -> str:
         return ""
     value = " ".join(value.split())
     return value if len(value) <= limit else value[:limit] + "..."
+
+
+def lan_addresses(port: int) -> list[str]:
+    addresses: set[str] = set()
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            address = info[4][0]
+            if not address.startswith("127."):
+                addresses.add(address)
+    except OSError:
+        pass
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            address = sock.getsockname()[0]
+            if not address.startswith("127."):
+                addresses.add(address)
+    except OSError:
+        pass
+
+    return [f"http://{address}:{port}/" for address in sorted(addresses)]
 
 
 class Dashboard:
@@ -156,9 +180,9 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path.startswith("/images/"):
                 self.image(parsed.path.removeprefix("/images/"))
             else:
-                self.error(HTTPStatus.NOT_FOUND, "Not found")
+                self.error_page(HTTPStatus.NOT_FOUND, "Not found")
         except sqlite3.Error as exc:
-            self.error(HTTPStatus.INTERNAL_SERVER_ERROR, f"DB error: {exc}")
+            self.error_page(HTTPStatus.INTERNAL_SERVER_ERROR, f"DB error: {exc}")
 
     def index(self) -> str:
         rows = self.dashboard.targets()
@@ -166,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
         for row in rows:
             ok = int(row["ok"] or 0) == 1
             status_class = "ok" if ok else "bad"
-            status = row["status_text"] or "未取得"
+            status = row["status_text"] or "not fetched"
             detail_href = "/property?url=" + quote(row["url"], safe="")
             cards.append(
                 f"""
@@ -178,15 +202,15 @@ class Handler(BaseHTTPRequestHandler):
                   <div class="price">{escape(yen(row['price']))}</div>
                   <p class="memo">{escape(row['memo'] or '')}</p>
                   <dl class="meta">
-                    <dt>取得</dt><dd>{escape(row['fetched_at'] or '未取得')}</dd>
-                    <dt>HTTP</dt><dd>{escape(str(row['status_code'] or '不明'))}</dd>
-                    <dt>問い合わせ</dt><dd>{escape(yes_no(row['contact_available']))}</dd>
-                    <dt>写真</dt><dd>{int(row['image_count'] or 0)}枚</dd>
+                    <dt>Fetched</dt><dd>{escape(row['fetched_at'] or 'not fetched')}</dd>
+                    <dt>HTTP</dt><dd>{escape(str(row['status_code'] or 'unknown'))}</dd>
+                    <dt>Contact</dt><dd>{escape(yes_no(row['contact_available']))}</dd>
+                    <dt>Photos</dt><dd>{int(row['image_count'] or 0)}</dd>
                   </dl>
                   <p class="last-event {severity_class(row['last_event_severity'])}">
-                    {escape(short_text(row['last_event_message']) or 'イベントなし')}
+                    {escape(short_text(row['last_event_message']) or 'No events')}
                   </p>
-                  <a class="external" href="{escape(row['url'])}" target="_blank" rel="noreferrer">掲載ページを開く</a>
+                  <a class="external" href="{escape(row['url'])}" target="_blank" rel="noreferrer">Open listing</a>
                 </article>
                 """
             )
@@ -195,11 +219,11 @@ class Handler(BaseHTTPRequestHandler):
             f"""
             <section class="summary">
               <h1>Property Watcher</h1>
-              <p>{len(rows)}件を監視中。DB: <code>{escape(self.dashboard.db_path)}</code></p>
+              <p>{len(rows)} properties. DB: <code>{escape(self.dashboard.db_path)}</code></p>
             </section>
             <section class="grid">{''.join(cards)}</section>
             <section class="events">
-              <h2>最近のイベント</h2>
+              <h2>Recent Events</h2>
               {self.event_table(self.dashboard.events(limit=30))}
             </section>
             """,
@@ -208,43 +232,40 @@ class Handler(BaseHTTPRequestHandler):
     def property_page(self, url: str) -> str:
         row = self.dashboard.target(url)
         if row is None:
-            return self.layout("Not found", "<h1>物件が見つかりません</h1>")
+            return self.layout("Not found", "<h1>Property not found</h1>")
 
         images = self.dashboard.images(url)
-        gallery = "".join(
-            self.image_figure(image)
-            for image in images
-        ) or "<p>保存写真はありません。</p>"
+        gallery = "".join(self.image_figure(image) for image in images) or "<p>No saved photos.</p>"
 
         body = f"""
-        <p><a href="/">← 一覧へ戻る</a></p>
+        <p><a href="/">Back to list</a></p>
         <section class="detail">
           <h1>{escape(row['name'])}</h1>
           <p class="price">{escape(yen(row['price']))}</p>
           <p>{escape(row['memo'] or '')}</p>
-          <p><a class="external" href="{escape(row['url'])}" target="_blank" rel="noreferrer">掲載ページを開く</a></p>
+          <p><a class="external" href="{escape(row['url'])}" target="_blank" rel="noreferrer">Open listing</a></p>
           <dl class="meta wide">
-            <dt>掲載状態</dt><dd>{escape(row['status_text'] or '未取得')}</dd>
-            <dt>取得日時</dt><dd>{escape(row['fetched_at'] or '未取得')}</dd>
-            <dt>HTTP</dt><dd>{escape(str(row['status_code'] or '不明'))}</dd>
-            <dt>問い合わせ</dt><dd>{escape(yes_no(row['contact_available']))}</dd>
-            <dt>タイトル</dt><dd>{escape(row['title'] or '')}</dd>
-            <dt>最終URL</dt><dd>{escape(row['final_url'] or '')}</dd>
-            <dt>写真保存</dt><dd>{escape(str(row['image_saved_count'] if row['image_saved_count'] is not None else '未実施'))}枚</dd>
-            <dt>写真エラー</dt><dd>{escape(row['image_error'] or '')}</dd>
-            <dt>取得エラー</dt><dd>{escape(row['error'] or '')}</dd>
+            <dt>Status</dt><dd>{escape(row['status_text'] or 'not fetched')}</dd>
+            <dt>Fetched</dt><dd>{escape(row['fetched_at'] or 'not fetched')}</dd>
+            <dt>HTTP</dt><dd>{escape(str(row['status_code'] or 'unknown'))}</dd>
+            <dt>Contact</dt><dd>{escape(yes_no(row['contact_available']))}</dd>
+            <dt>Title</dt><dd>{escape(row['title'] or '')}</dd>
+            <dt>Final URL</dt><dd>{escape(row['final_url'] or '')}</dd>
+            <dt>Saved photos</dt><dd>{escape(str(row['image_saved_count'] if row['image_saved_count'] is not None else 'not attempted'))}</dd>
+            <dt>Photo error</dt><dd>{escape(row['image_error'] or '')}</dd>
+            <dt>Fetch error</dt><dd>{escape(row['error'] or '')}</dd>
           </dl>
         </section>
         <section>
-          <h2>保存写真</h2>
+          <h2>Saved Photos</h2>
           <div class="gallery">{gallery}</div>
         </section>
         <section>
-          <h2>この物件のイベント</h2>
+          <h2>Property Events</h2>
           {self.event_table(self.dashboard.events(url=url))}
         </section>
         <section>
-          <h2>最新テキスト</h2>
+          <h2>Latest Text</h2>
           <pre>{escape(row['raw_text'] or '')}</pre>
         </section>
         """
@@ -265,7 +286,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def event_table(self, events: list[sqlite3.Row]) -> str:
         if not events:
-            return "<p>イベントはありません。</p>"
+            return "<p>No events.</p>"
         rows = []
         for event in events:
             rows.append(
@@ -285,7 +306,7 @@ class Handler(BaseHTTPRequestHandler):
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>日時</th><th>重要度</th><th>種別</th><th>物件</th><th>内容</th><th>前</th><th>後</th></tr>
+              <tr><th>Time</th><th>Severity</th><th>Type</th><th>Property</th><th>Message</th><th>Old</th><th>New</th></tr>
             </thead>
             <tbody>{''.join(rows)}</tbody>
           </table>
@@ -299,10 +320,10 @@ class Handler(BaseHTTPRequestHandler):
             path = Path.cwd() / path
         resolved = path.resolve()
         if self.dashboard.image_dir not in resolved.parents and resolved != self.dashboard.image_dir:
-            self.error(HTTPStatus.FORBIDDEN, "Forbidden")
+            self.error_page(HTTPStatus.FORBIDDEN, "Forbidden")
             return
         if not resolved.exists() or not resolved.is_file():
-            self.error(HTTPStatus.NOT_FOUND, "Image not found")
+            self.error_page(HTTPStatus.NOT_FOUND, "Image not found")
             return
         content_type = mimetypes.guess_type(str(resolved))[0] or "application/octet-stream"
         data = resolved.read_bytes()
@@ -320,7 +341,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def error(self, status: HTTPStatus, message: str) -> None:
+    def error_page(self, status: HTTPStatus, message: str) -> None:
         data = self.layout(status.phrase, f"<h1>{escape(status.phrase)}</h1><p>{escape(message)}</p>").encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -372,6 +393,18 @@ class Handler(BaseHTTPRequestHandler):
     img {{ width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 12px; border: 1px solid var(--line); background: #e5e7eb; }}
     figcaption {{ color: var(--muted); font-size: 12px; margin-top: 4px; }}
     pre {{ white-space: pre-wrap; overflow-wrap: anywhere; background: #0f172a; color: #e2e8f0; padding: 16px; border-radius: 12px; max-height: 520px; overflow: auto; }}
+    @media (max-width: 640px) {{
+      body {{ padding: 12px; }}
+      .grid {{ grid-template-columns: 1fr; gap: 12px; }}
+      .card, .detail, .events, section {{ border-radius: 12px; padding: 14px; }}
+      .card-head {{ display: block; }}
+      .pill {{ margin-top: 8px; }}
+      .price {{ font-size: 22px; }}
+      .meta, .wide {{ grid-template-columns: 82px 1fr; font-size: 13px; }}
+      .gallery {{ grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }}
+      table {{ font-size: 12px; }}
+      th, td {{ padding: 7px 6px; }}
+    }}
   </style>
 </head>
 <body>{body}</body>
@@ -387,7 +420,11 @@ def main() -> None:
     parser.add_argument("--image-dir", default="property_images", help="saved image directory")
     parser.add_argument("--host", default="127.0.0.1", help="bind host")
     parser.add_argument("--port", type=int, default=8000, help="bind port")
+    parser.add_argument("--mobile", action="store_true", help="bind to 0.0.0.0 and print LAN URLs")
     args = parser.parse_args()
+
+    if args.mobile and args.host == "127.0.0.1":
+        args.host = "0.0.0.0"
 
     if not Path(args.db).exists():
         raise SystemExit(f"DB not found: {args.db}")
@@ -395,6 +432,14 @@ def main() -> None:
     Handler.dashboard = Dashboard(args.db, args.image_dir)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Serving Property Watcher dashboard at http://{args.host}:{args.port}/")
+    if args.mobile:
+        urls = lan_addresses(args.port)
+        if urls:
+            print("Open one of these URLs from a phone on the same Wi-Fi:")
+            for url in urls:
+                print(f"  {url}")
+        else:
+            print("Could not detect a LAN IP. Check your PC's Wi-Fi IPv4 address.")
     server.serve_forever()
 
 

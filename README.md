@@ -143,6 +143,14 @@ python -m property_watcher.web --db property_watcher.db --image-dir property_ima
 
 起動後、ブラウザで `http://127.0.0.1:8000/` を開きます。
 
+同じWi-Fiのスマホから見る場合:
+
+```bash
+python -m property_watcher.web --mobile --db property_watcher.db --image-dir property_images
+```
+
+起動ログに `http://192.168.x.x:8000/` のようなURLが表示されるので、スマホのブラウザで開きます。Windowsのファイアウォール確認が出た場合は、プライベートネットワークで許可してください。
+
 一覧では監視中の物件、最新価格、掲載状態、HTTP状態、問い合わせ導線、保存写真数、最近のイベントを確認できます。物件名をクリックすると、詳細・イベント履歴・保存済み室内写真・最新テキストを確認できます。
 
 ## raw_text のクリーニング
