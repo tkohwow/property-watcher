@@ -27,6 +27,9 @@ def amflat_like_candidate(**overrides):
 
 
 class DiscoverTest(unittest.TestCase):
+    def test_parse_price_handles_oku_price_in_man_yen(self):
+        self.assertEqual(discover.parse_price("1億1500万円"), 11500)
+
     def test_identifies_amflat_sale_comparable_candidate(self):
         self.assertTrue(
             discover.is_amflat_comp_candidate(

@@ -1,9 +1,12 @@
 import unittest
 
-from property_watcher.parser import parse_html
+from property_watcher.parser import extract_price, parse_html
 
 
 class ParserTest(unittest.TestCase):
+    def test_extracts_oku_price_in_man_yen(self):
+        self.assertEqual(extract_price("価格: 1億1500万円"), 11500)
+
     def test_extracts_property_overview_and_ignores_page_chrome(self):
         html = """
         <html><head>

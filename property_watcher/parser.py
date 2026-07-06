@@ -21,6 +21,10 @@ PRICE_PATTERNS = [
     re.compile(r"([0-9,]+)\s*万円"),
     re.compile(r"価格[^0-9]{0,10}([0-9,]+)"),
 ]
+OKU_PRICE_PATTERNS = [
+    re.compile(r"([0-9,]+)\s*億\s*([0-9,]+)?\s*万円"),
+    re.compile(r"([0-9,]+)\s*億\s*円"),
+]
 
 PROPERTY_KEYWORDS = [
     "物件名", "価格", "販売価格", "間取り", "専有面積", "バルコニー", "所在階",
@@ -308,6 +312,16 @@ def extract_clean_text(soup: BeautifulSoup, page_title: str) -> str:
 
 def extract_price(text: str) -> int | None:
     candidates: list[int] = []
+    for pattern in OKU_PRICE_PATTERNS:
+        for match in pattern.finditer(text):
+            try:
+                value = int(match.group(1).replace(",", "")) * 10000
+                if len(match.groups()) > 1 and match.group(2):
+                    value += int(match.group(2).replace(",", ""))
+            except ValueError:
+                continue
+            if value >= 100:
+                candidates.append(value)
     for pattern in PRICE_PATTERNS:
         for match in pattern.finditer(text):
             try:
