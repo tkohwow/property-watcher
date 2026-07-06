@@ -168,10 +168,14 @@ python -m property_watcher.pages --db property_watcher.db --image-dir property_i
 
 ## 追加候補物件のチェック
 
-日次のGitHub Actionsでは、監視中物件の更新確認に続いて、追加候補物件もチェックします。
+日次のGitHub Actionsでは、監視中物件の更新確認前に、追加候補物件もチェックします。条件に合った候補は `properties.csv` に自動追加され、その直後の監視処理でDB保存と画像保存の対象になります。
 
 ```bash
-python -m property_watcher.discover --csv properties.csv --db property_watcher.db --notify
+python -m property_watcher.discover --csv properties.csv --db property_watcher.db --auto-add --notify
 ```
 
-現在はSUUMOの「中野坂上」「西新宿」「東中野」「初台」検索結果から、既存CSVにない候補を抽出します。条件はデフォルトで `6500万円以上`、`1億1000万円以下`、`48㎡以上`、`2LDK相当以上` です。候補は `candidate_listings` テーブルに保存され、同じ候補は再通知しません。候補は自動で `properties.csv` へ追加せず、メールとActionsログで確認できるだけにしています。
+中野坂上アムフラット702の売却参考として、対象は「55.61㎡・2LDK・1998年築・中野坂上駅徒歩3分」に近い比較候補へ寄せています。検索対象はSUUMOの「中野坂上」「中野新橋」「西新宿五丁目」「東中野」です。
+
+デフォルト条件は `7000万円以上`、`1億1500万円以下`、`45㎡以上75㎡以下`、`1988年以降築`、`駅徒歩10分以内`、`2LDK/2SLDK/1LDK+S/納戸付き/75㎡以下の3LDK`、住所は中野区中央・本町・弥生町・東中野、新宿区北新宿・西新宿です。アムフラット702の売出履歴が8,780万円から8,998万円程度だったため、狭すぎる投資用や広すぎるファミリー物件を外しつつ、価格上限は相場上振れ候補も拾えるようにしています。
+
+候補は `candidate_listings` テーブルに保存され、同じ候補は再通知しません。`--auto-add` が有効な場合は、DBに過去記録済みでもCSV未登録なら `properties.csv` へ追記します。

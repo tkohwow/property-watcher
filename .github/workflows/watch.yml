@@ -36,6 +36,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Discover new property candidates
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+        run: python -m property_watcher.discover --csv properties.csv --db property_watcher.db --auto-add --notify
+
       - name: Run watcher
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
@@ -43,17 +50,11 @@ jobs:
           NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
         run: python -m property_watcher.run --csv properties.csv --db property_watcher.db --images "${{ inputs.image_mode || 'initial' }}"
 
-      - name: Discover new property candidates
-        env:
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
-        run: python -m property_watcher.discover --csv properties.csv --db property_watcher.db --notify
-
       - name: Commit database changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add properties.csv
           git add -f property_watcher.db
           if [ -d property_images ]; then
             git add property_images
