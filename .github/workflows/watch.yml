@@ -11,7 +11,7 @@ on:
         options:
           - initial
           - refresh
-          - off
+          - 'off'
   schedule:
     # JST 9:15
     - cron: '15 0 * * *'
@@ -42,6 +42,13 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
         run: python -m property_watcher.run --csv properties.csv --db property_watcher.db --images "${{ inputs.image_mode || 'initial' }}"
+
+      - name: Discover new property candidates
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+        run: python -m property_watcher.discover --csv properties.csv --db property_watcher.db --notify
 
       - name: Commit database changes
         run: |

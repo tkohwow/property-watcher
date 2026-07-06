@@ -165,3 +165,13 @@ python -m property_watcher.pages --db property_watcher.db --image-dir property_i
 価格・掲載終了・問い合わせ導線の判定にはノイズ除去前の本文も使いますが、DBに保存して後から読む本文は `raw_text` として整形済みの内容を保存します。
 
 次回の GitHub Actions 実行後に `latest_snapshots.raw_text` が新しい整形ルールで上書きされます。
+
+## 追加候補物件のチェック
+
+日次のGitHub Actionsでは、監視中物件の更新確認に続いて、追加候補物件もチェックします。
+
+```bash
+python -m property_watcher.discover --csv properties.csv --db property_watcher.db --notify
+```
+
+現在はSUUMOの「中野坂上」「西新宿」「東中野」「初台」検索結果から、既存CSVにない候補を抽出します。条件はデフォルトで `6500万円以上`、`1億1000万円以下`、`48㎡以上`、`2LDK相当以上` です。候補は `candidate_listings` テーブルに保存され、同じ候補は再通知しません。候補は自動で `properties.csv` へ追加せず、メールとActionsログで確認できるだけにしています。
