@@ -1,6 +1,7 @@
 import argparse
 import csv
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,7 @@ from .run import load_targets
 
 
 USER_AGENT = "Mozilla/5.0 (compatible; PersonalPropertyWatcher/1.0; +https://github.com/)"
+FETCH_ATTEMPTS = 3
 
 SEARCHES = [
     (
@@ -149,15 +151,30 @@ def parse_walk_minutes(station_text: str) -> int | None:
 
 
 def fetch_candidates(search_name: str, search_url: str) -> list[Candidate]:
-    response = requests.get(
-        search_url,
-        timeout=30,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-        },
-    )
-    response.raise_for_status()
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            response = requests.get(
+                search_url,
+                timeout=30,
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+                },
+            )
+            response.raise_for_status()
+            break
+        except requests.RequestException as exc:
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            retryable = status_code is None or status_code == 429 or status_code >= 500
+            if not retryable or attempt == FETCH_ATTEMPTS:
+                raise
+            delay = 2 ** (attempt - 1)
+            print(
+                f"  Request failed for {search_name} "
+                f"({status_code or exc.__class__.__name__}); retrying in {delay}s..."
+            )
+            time.sleep(delay)
+
     soup = BeautifulSoup(response.text, "lxml")
     candidates: list[Candidate] = []
     seen_ids: set[str] = set()
@@ -421,9 +438,15 @@ def main() -> None:
     seen_at = now_iso()
 
     all_candidates: list[Candidate] = []
+    skipped_searches: list[str] = []
     for search_name, search_url in SEARCHES:
         print(f"Searching {search_name}: {search_url}")
-        found = fetch_candidates(search_name, search_url)
+        try:
+            found = fetch_candidates(search_name, search_url)
+        except requests.RequestException as exc:
+            skipped_searches.append(search_name)
+            print(f"::warning::Skipping {search_name} after repeated request failure: {exc}")
+            continue
         filtered = [
             candidate
             for candidate in found
@@ -442,6 +465,9 @@ def main() -> None:
         ]
         print(f"  found={len(found)} promising_new={len(filtered)}")
         all_candidates.extend(filtered)
+
+    if skipped_searches:
+        print(f"Skipped {len(skipped_searches)} search(es): {', '.join(skipped_searches)}")
 
     deduped = sort_candidates(dedupe_similar(list({candidate.url: candidate for candidate in all_candidates}.values())))
     added_count = append_to_csv(args.csv, deduped) if args.auto_add else 0

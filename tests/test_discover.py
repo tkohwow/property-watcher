@@ -27,6 +27,14 @@ def amflat_like_candidate(**overrides):
 
 
 class DiscoverTest(unittest.TestCase):
+    @staticmethod
+    def response(status_code: int, text: str = ""):
+        response = discover.requests.Response()
+        response.status_code = status_code
+        response.url = "https://example.com/search"
+        response._content = text.encode("utf-8")
+        return response
+
     def test_parse_price_handles_oku_price_in_man_yen(self):
         self.assertEqual(discover.parse_price("1億1500万円"), 11500)
 
@@ -99,6 +107,48 @@ class DiscoverTest(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[1]["url"], candidate.url)
         self.assertIn("アムフラット702売却比較候補", rows[1]["memo"])
+
+    def test_fetch_candidates_retries_temporary_server_errors(self):
+        responses = [self.response(503), self.response(503), self.response(200)]
+
+        with (
+            patch.object(discover.requests, "get", side_effect=responses) as request,
+            patch.object(discover.time, "sleep") as sleep,
+        ):
+            candidates = discover.fetch_candidates("中野新橋", "https://example.com/search")
+
+        self.assertEqual(candidates, [])
+        self.assertEqual(request.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2])
+
+    def test_main_skips_failed_search_and_continues(self):
+        failure = discover.requests.HTTPError("503 Server Error", response=self.response(503))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            csv_path = temp_path / "properties.csv"
+            db_path = temp_path / "property_watcher.db"
+            csv_path.write_text("name,url,memo\n", encoding="utf-8")
+
+            with (
+                patch.object(
+                    discover,
+                    "SEARCHES",
+                    [
+                        ("中野新橋", "https://example.com/failed"),
+                        ("中野坂上", "https://example.com/success"),
+                    ],
+                ),
+                patch.object(discover, "fetch_candidates", side_effect=[failure, []]) as fetch,
+                patch.object(
+                    sys,
+                    "argv",
+                    ["discover", "--csv", str(csv_path), "--db", str(db_path)],
+                ),
+            ):
+                discover.main()
+
+        self.assertEqual(fetch.call_count, 2)
 
 
 if __name__ == "__main__":

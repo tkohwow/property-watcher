@@ -2,6 +2,22 @@ name: Publish Pages
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'property_watcher/pages.py'
+      - 'property_watcher/web.py'
+      - 'property_watcher.db'
+      - 'property_images/**'
+      - '.github/workflows/pages.yml'
+  workflow_run:
+    workflows:
+      - Watch properties
+    types:
+      - completed
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -14,6 +30,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

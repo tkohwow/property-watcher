@@ -1,6 +1,7 @@
 import argparse
 import mimetypes
 import sqlite3
+from contextlib import closing
 from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -42,13 +43,22 @@ def short_text(value: str | None, limit: int = 160) -> str:
     return value if len(value) <= limit else value[:limit] + "..."
 
 
+def event_price(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(str(value).replace(",", ""))
+    except ValueError:
+        return None
+
+
 class Dashboard:
     def __init__(self, db_path: str, image_dir: str):
         self.db_path = db_path
         self.image_dir = Path(image_dir).resolve()
 
     def targets(self) -> list[sqlite3.Row]:
-        with open_db(self.db_path) as conn:
+        with closing(open_db(self.db_path)) as conn:
             return conn.execute(
                 """
                 SELECT
@@ -85,7 +95,7 @@ class Dashboard:
             ).fetchall()
 
     def target(self, url: str) -> sqlite3.Row | None:
-        with open_db(self.db_path) as conn:
+        with closing(open_db(self.db_path)) as conn:
             return conn.execute(
                 """
                 SELECT t.name, t.memo, t.url, t.updated_at,
@@ -105,7 +115,7 @@ class Dashboard:
             ).fetchone()
 
     def events(self, url: str | None = None, limit: int = 80) -> list[sqlite3.Row]:
-        with open_db(self.db_path) as conn:
+        with closing(open_db(self.db_path)) as conn:
             if url:
                 return conn.execute(
                     """
@@ -129,8 +139,33 @@ class Dashboard:
                 (limit,),
             ).fetchall()
 
+    def price_history(self, url: str, current_price: int | None) -> list[tuple[int, str | None]]:
+        with closing(open_db(self.db_path)) as conn:
+            events = conn.execute(
+                """
+                SELECT occurred_at, old_value, new_value
+                FROM events
+                WHERE url = ? AND event_type = 'price_changed'
+                ORDER BY id
+                """,
+                (url,),
+            ).fetchall()
+
+        history: list[tuple[int, str | None]] = []
+
+        def append(price: int | None, occurred_at: str | None) -> None:
+            if price is not None and (not history or history[-1][0] != price):
+                history.append((price, occurred_at))
+
+        for event in events:
+            append(event_price(event["old_value"]), None)
+            append(event_price(event["new_value"]), event["occurred_at"])
+
+        append(current_price, None)
+        return history
+
     def images(self, url: str) -> list[sqlite3.Row]:
-        with open_db(self.db_path) as conn:
+        with closing(open_db(self.db_path)) as conn:
             return conn.execute(
                 """
                 SELECT *

@@ -1,10 +1,11 @@
 import argparse
 import shutil
+import unicodedata
 from hashlib import sha1
 from html import escape
 from pathlib import Path
 
-from .web import Dashboard, severity_class, short_text, yen, yes_no
+from .web import Dashboard, severity_class, short_text, yes_no
 
 
 def page_name(url: str) -> str:
@@ -44,6 +45,13 @@ code { background: #eef2ff; padding: 2px 6px; border-radius: 6px; }
 .card-head { display: flex; gap: 12px; justify-content: space-between; align-items: start; }
 .card h2 { line-height: 1.35; }
 .price { font-size: 26px; font-weight: 750; margin: 8px 0; }
+.price-history { margin: 14px 0; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #f8fafc; }
+.price-history-title { color: var(--muted); font-size: 12px; font-weight: 700; margin-bottom: 8px; }
+.price-history-track { display: flex; align-items: center; gap: 8px; overflow-x: auto; padding-bottom: 3px; scrollbar-width: thin; }
+.price-history-point { flex: 0 0 auto; display: grid; gap: 2px; }
+.price-history-value { font-size: 14px; font-weight: 750; white-space: nowrap; }
+.price-history-date { color: var(--muted); font-size: 11px; }
+.price-history-arrow { flex: 0 0 auto; color: #94a3b8; font-weight: 700; }
 .memo, .last-event { color: var(--muted); min-height: 1.5em; }
 .pill { display: inline-block; white-space: nowrap; border-radius: 999px; padding: 5px 9px; font-size: 12px; font-weight: 700; }
 .ok { background: #dcfce7; color: #166534; }
@@ -73,6 +81,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #0f172a; color
   .card-head { display: block; }
   .pill { margin-top: 8px; }
   .price { font-size: 22px; }
+  .price-history { margin: 12px 0; padding: 10px; }
   .meta, .wide { grid-template-columns: 82px 1fr; font-size: 13px; }
   .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   table { font-size: 12px; }
@@ -111,8 +120,54 @@ def event_table(events) -> str:
     """
 
 
+def name_sort_key(row) -> str:
+    return unicodedata.normalize("NFKC", row["name"]).casefold()
+
+
+def price_label(value) -> str:
+    if value is None:
+        return "価格不明"
+    return f"{int(value):,}万円"
+
+
+def price_history_html(history: list[tuple[int, str | None]]) -> str:
+    if not history:
+        return """
+        <div class="price-history">
+          <div class="price-history-title">価格推移</div>
+          <span class="price-history-date">価格情報なし</span>
+        </div>
+        """
+
+    points = []
+    for index, (price, occurred_at) in enumerate(history):
+        if index:
+            points.append('<span class="price-history-arrow" aria-hidden="true">→</span>')
+        if occurred_at:
+            date_label = occurred_at[:10].replace("-", "/")
+        elif index == len(history) - 1:
+            date_label = "現在"
+        else:
+            date_label = "以前"
+        points.append(
+            f"""
+            <span class="price-history-point">
+              <span class="price-history-value">{price:,}万円</span>
+              <span class="price-history-date">{date_label}</span>
+            </span>
+            """
+        )
+
+    return f"""
+    <div class="price-history" aria-label="価格推移">
+      <div class="price-history-title">価格推移</div>
+      <div class="price-history-track">{''.join(points)}</div>
+    </div>
+    """
+
+
 def render_index(dashboard: Dashboard) -> str:
-    rows = dashboard.targets()
+    rows = sorted(dashboard.targets(), key=name_sort_key)
     cards = []
     for row in rows:
         ok = int(row["ok"] or 0) == 1
@@ -125,7 +180,8 @@ def render_index(dashboard: Dashboard) -> str:
                 <h2><a href="properties/{page_name(row['url'])}">{escape(row['name'])}</a></h2>
                 <span class="pill {status_class}">{escape(status)}</span>
               </div>
-              <div class="price">{escape(yen(row['price']))}</div>
+              <div class="price">{escape(price_label(row['price']))}</div>
+              {price_history_html(dashboard.price_history(row['url'], row['price']))}
               <p class="memo">{escape(row['memo'] or '')}</p>
               <dl class="meta">
                 <dt>Fetched</dt><dd>{escape(row['fetched_at'] or 'not fetched')}</dd>
@@ -182,7 +238,7 @@ def render_property(dashboard: Dashboard, url: str) -> str:
         <p><a href="../index.html">Back to list</a></p>
         <section class="detail">
           <h1>{escape(row['name'])}</h1>
-          <p class="price">{escape(yen(row['price']))}</p>
+          <p class="price">{escape(price_label(row['price']))}</p>
           <p>{escape(row['memo'] or '')}</p>
           <p><a class="external" href="{escape(row['url'])}" target="_blank" rel="noreferrer">Open listing</a></p>
           <dl class="meta wide">
